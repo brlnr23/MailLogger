@@ -56,10 +56,13 @@ class MailDebugger extends WireData implements Module, ConfigurableModule {
 			return;
 		}
 		
-		
 		$mail = $event->object;
 		
-		$orgRecipients = $mail->to;
+		$orgRecipients = array(
+			"to" => $mail->to,
+			"cc" => $mail->cc,
+			"bcc" => $mail->bcc,
+		);
 		$orgBody = $mail->body;
 		$orgBodyHTML = $mail->bodyHTML;
 		
@@ -68,9 +71,18 @@ class MailDebugger extends WireData implements Module, ConfigurableModule {
 		$additionalBody = "Original recipients\r\n";
 		$additionalBodyHTML = "<strong>Original recipients</strong><ul>";
 		
-		foreach($orgRecipients as $recipient) {
-			$additionalBody .= $recipient."\r\n";
-			$additionalBodyHTML .= "<li>$recipient</li>";				
+		foreach($orgRecipients as $type => $recipients) {
+			if(!empty($recipients)) {
+				$additionalBody .= $type.": \r\n";
+				$additionalBodyHTML .= "<li>$type <ul>";				
+
+				foreach($recipients as $recipient) {
+					$additionalBody .= $recipient."\r\n";
+					$additionalBodyHTML .= "<li>$recipient</li>";				
+				}
+
+				$additionalBodyHTML .= "</ul></li>";
+			}
 		}
 		
 		$additionalBody .= "--\r\n\r\n";
@@ -80,8 +92,10 @@ class MailDebugger extends WireData implements Module, ConfigurableModule {
 		$mail->bodyHTML = str_replace("<body>", $additionalBodyHTML, $orgBodyHTML);
 		
 		
-		// overwrite recipients
+		// overwrite original recipients
 		$mail->to();
+		$mail->cc();
+		$mail->bcc();
 		$mail->to($this->mailloggerDropboxEmail);
 		
 	}
