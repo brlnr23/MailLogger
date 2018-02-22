@@ -1,0 +1,152 @@
+<?php namespace ProcessWire;
+
+/**
+ * MailDebugger
+ *
+ * This logs all outgoing mails. When the site is in debug mode all outgoing mails are catched and dropped to a specified mailbox.
+ * Thank you for the Mail logging recipe provided by Ryan Cramer and collected by Marcus Herrmann
+ * https://processwire-recipes.com/recipes/logging-outgoing-emails/
+ * 
+ * @copyright 2018 Christian Lange
+ * @license https://processwire.com/about/license/mit/
+ *
+ */
+
+class MailDebugger extends WireData implements Module, ConfigurableModule {
+
+	public static function getModuleInfo() {
+
+		return array(
+			'title' => 'Mail Debugger', 
+			'version' => 1, 
+			'summary' => 'Log outgoing emails and redirect mails in debug mode to a separate mailbox',
+			'href' => 'https://processwire-recipes.com/recipes/logging-outgoing-emails/',
+			'singular' => true, 
+			'autoload' => true, 
+			'icon' => 'envelope-o', 
+		);
+	}
+
+	/**
+	 * Init & register webhooks
+	 */
+	public function init() {
+
+		// add hook after sending e-mails with WireMail
+		$this->addHookBefore('WireMail::send', $this, 'debugMail');
+		$this->addHookAfter('WireMail::send', $this, 'logMail');
+	}
+
+	
+	/**
+	 * debugMail
+	 * 
+	 * Replace original recipients and send the mail to debug mailbox.
+	 * Prepend original recipients information to the email body.
+	 * 
+	 * @param HookEvent $event
+	 *
+	 */
+	public function debugMail($event) {
+		
+		if(!$this->config->debug || $this->mailloggerDropboxEnabled != 1) {	return;	}
+		
+		if(empty($this->mailloggerDropboxEmail)) {
+			$this->log->error("Mail Debugger: No debug email address specified. Please enter an e-mail address in the module settings.");
+			return;
+		}
+		
+		
+		$mail = $event->object;
+		
+		$orgRecipients = $mail->to;
+		$orgBody = $mail->body;
+		$orgBodyHTML = $mail->bodyHTML;
+		
+		
+		// prepare and prepend additional body
+		$additionalBody = "Original recipients\r\n";
+		$additionalBodyHTML = "<strong>Original recipients</strong><ul>";
+		
+		foreach($orgRecipients as $recipient) {
+			$additionalBody .= $recipient."\r\n";
+			$additionalBodyHTML .= "<li>$recipient</li>";				
+		}
+		
+		$additionalBody .= "--\r\n\r\n";
+		$additionalBodyHTML .= "</ul><hr><br>";
+		
+		$mail->body	= $additionalBody . $orgBody;
+		$mail->bodyHTML = str_replace("<body>", $additionalBodyHTML, $orgBodyHTML);
+		
+		
+		// overwrite recipients
+		$mail->to();
+		$mail->to($this->mailloggerDropboxEmail);
+		
+	}
+	
+	
+	/**
+	 * Logs an outgoing e-mail to the logfile
+	 * 
+	 * @param HookEvent $event
+	 *
+	 */
+	public function logMail($event) {
+		
+		if($this->mailloggerEnabled != 1) { return; }
+		
+		$mail = $event->object;
+		
+		$logMessage = ($this->config->debug) ? "DEBUG: " : "";
+		$logMessage .= "SENT ($event->return of " . count($mail->to) . "), " .
+		  "SUBJECT ($mail->subject), " .
+		  "TO (" .  implode(", ", $mail->to) . "), " .
+		  "FROM ($mail->from)";
+		
+		$event->wire('log')->save('maillogger', $logMessage);
+	}
+
+	
+	public static function getModuleConfigInputfields(array $data) {
+		$inputfields = new InputfieldWrapper(); 
+
+		// enable outgoing mail log
+		$field = wire('modules')->get('InputfieldCheckbox');
+		$field->name = 'mailloggerEnabled';
+		$field->label = 'Log outgoing emails?';
+		$field->description = 'If enabled all outgoing mails are logged in a logfile.';
+		if(isset($data['mailloggerEnabled']) && $data['mailloggerEnabled'] == 1) {
+			$field->attr('checked', 'checked');
+		}
+		$inputfields->add($field); 
+		
+		// enable email dropbox
+		$field = wire('modules')->get('InputfieldCheckbox');
+		$field->name = 'mailloggerDropboxEnabled';
+		$field->label = 'Drop emails?';
+		$field->description = 'If enabled all outgoing mails are redirected to the specified email address when the page runs in debug mode.';
+		if(isset($data['mailloggerDropboxEnabled']) && $data['mailloggerDropboxEnabled'] == 1) {
+			$field->attr('checked', 'checked');
+		}
+		$inputfields->add($field); 
+		
+		
+		// dropbox email address
+		if(isset($data['mailloggerDropboxEnabled']) && $data['mailloggerDropboxEnabled'] == 1) {
+			$field = wire('modules')->get('InputfieldText');
+			$field->name = 'mailloggerDropboxEmail';
+			$field->label = 'Debug email address';
+			$field->description = 'Enter the email address where all emails are send to in debug mode.';
+			$field->required = true;
+			if(isset($data['mailloggerDropboxEmail'])) {
+				$field->value = $data['mailloggerDropboxEmail'];
+			}
+		}
+		$inputfields->add($field); 
+
+		return $inputfields; 
+	}	
+	
+}
